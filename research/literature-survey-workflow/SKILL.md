@@ -54,7 +54,11 @@ Present results to user and confirm the list before downloading.
 
 ## Step 2: Download PDFs
 
-Create target directory, then download with rate limiting (arXiv: 1 req / 3.5 sec).
+**Priority**: arXiv (free) → Sci-Hub (two-step, see references/sci-hub.md) → ResearchGate / publisher.
+
+### For arXiv papers
+
+Create target directory, then download with rate limiting (1 req / 3.5 sec):
 
 ```python
 import time, os
@@ -75,7 +79,13 @@ for i, (arxiv_id, short_name) in enumerate(papers):
         time.sleep(3.5)  # respect arXiv rate limit
 ```
 
-**Naming convention**: `{arXiv_ID}_{Short_English_Name}.pdf`
+### For paywalled papers (Sci-Hub)
+
+Use the two-step method — scrape PDF URL from `<meta property="pdf_url">`, then download the storage URL. The PDF storage URLs bypass the anti-bot captcha on the HTML page. Full reference: `references/sci-hub.md`.
+
+Batch script: `scripts/batch_scihub_download.sh`
+
+**Naming convention**: `{FirstAuthor}{Year}_{Short_English_Title}.pdf` (for arXiv: `{arXiv_ID}_{Short_Name}.pdf`)
 
 ## Step 3: Generate Literature Overview (.md)
 
@@ -205,7 +215,23 @@ If Semantic Scholar hits 429: wait 5 seconds and retry once.
 
 ### Sci-Hub for Paywalled Papers
 
-When a paper is behind a paywall and has no arXiv preprint, Sci-Hub can be used as a last resort. See `references/sci-hub.md` for current domain status and anti-bot workarounds. In short: open `https://sci-hub.ru/<DOI>` in a real browser (curl gets blocked by captcha), save the PDF locally, then resume with PyPDF2 extraction.
+When a paper is behind a paywall and has no arXiv preprint, use Sci-Hub's **two-step download** (detailed in `references/sci-hub.md`):
+
+1. Fetch `https://sci-hub.st/<DOI>` and extract `pdf_url` from `<meta property="pdf_url">`
+2. Download the PDF directly from that storage URL with a `Referer` header
+
+The PDF storage URLs have no anti-bot protection — only the HTML page does. This fully automates Sci-Hub downloads.
+
+**Batch download** via `scripts/batch_scihub_download.sh`:
+```bash
+# Prepare a DOI list (one per line: "DOI  ShortName")
+echo "10.1017/S0263574719001450 Meng2019_Aerial" > /tmp/dois.txt
+echo "10.1109/LRA.2022.3196158 Krebs2022" >> /tmp/dois.txt
+
+bash scripts/batch_scihub_download.sh /mnt/e/目标目录 /tmp/dois.txt
+```
+
+**Fallback**: If Sci-Hub doesn't have the paper, try ResearchGate or the publisher's open-access page.
 
 ## Pitfalls
 
