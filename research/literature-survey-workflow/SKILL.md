@@ -11,7 +11,22 @@ Four-step pipeline: search → download → overview → survey paper.
 
 ## Step 1: Search Papers
 
-Use arXiv API (no key, simple curl/urllib). Search with multiple keyword combinations to maximize recall.
+Multi-platform search to maximize coverage. **Always use 2+ platforms** for any non-trivial topic.
+
+### Platform summary
+
+| # | Platform | Scope | API | Best for |
+|---|----------|-------|-----|----------|
+| 1 | **arXiv** | CS, Math, Physics, EE | XML API, no key | Engineering, robotics, AI |
+| 2 | **Semantic Scholar** | All academic fields | JSON API, no key | Cross-discipline, citation data |
+| 3 | **PubMed** | Biomedicine, life sciences | Entrez E-utilities | Medical, biology |
+| 4 | **MDPI** | Open access journals | Web search | Engineering, sensors, materials |
+| 5 | **OA Library** | Open access aggregator | Web search | Cross-discipline OA papers |
+| 6 | **国家哲学社会科学文献中心** | 中文社科文献 | Web search | Chinese social sciences |
+| 7 | **MedSci/梅斯** | 中文医学期刊 | Web search | Chinese medical literature |
+| 8 | **web_search** | All | DuckDuckGo | Supplementary, Chinese keywords |
+
+### 1. arXiv API (primary for CS/EE/robotics)
 
 ```python
 import urllib.request
@@ -39,27 +54,65 @@ def search_arxiv(query, max_results=12):
     return list(papers.values())
 ```
 
-**Keyword strategy**:
-- If the exact topic has few results, split into related sub-directions (e.g. "dual-arm aerial" → search "dual-arm manipulation" + "aerial manipulation" separately)
-- Try `ti:`, `abs:`, `all:` prefixes
-- For Chinese topics, also do web_search with Chinese keywords as supplement
+### 2. Semantic Scholar API (cross-discipline, JSON)
 
-**Also try Semantic Scholar** (returns JSON, better relevance):
 ```python
 url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={urllib.request.quote(q)}&limit=10&fields=title,authors,year,citationCount,externalIds,abstract"
 ```
 Note: 1 req/sec rate limit. If 429, wait and retry.
 
+### 3. PubMed Entrez API (biomedical)
+
+```python
+import urllib.request, xml.etree.ElementTree as ET
+# Step 1: Search for PMIDs
+search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmax=15&term={urllib.request.quote(query)}"
+# Step 2: Fetch details
+fetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={','.join(pmids)}&rettype=abstract"
+```
+Note: 3 req/sec without API key, 10 req/sec with key (register at NCBI).
+
+### 4-7. Platform-specific web_search
+
+For platforms without structured APIs, use web_search with `site:` prefix:
+
+```
+"keyword1 keyword2" site:mdpi.com
+"关键词" site:ncpssd.org
+"keyword" site:medsci.cn
+"keyword" site:oalib.com
+```
+
+### 8. General web_search
+
+Use for:
+- Chinese keywords (e.g., "双臂协作机器人 综述")
+- Finding papers missed by structured APIs
+- Cross-validation
+
+**Keyword strategy**:
+- If the exact topic has few results, split into related sub-directions
+- Try `ti:`, `abs:`, `all:` prefixes on arXiv
+- Mix English + Chinese keywords for Chinese platforms
+- Combine results across platforms, deduplicate by DOI/arXiv ID
+
 Present results to user and confirm the list before downloading.
 
 ## Step 2: Download PDFs
 
-**Priority**: arXiv (free) → Sci-Hub (two-step, see references/sci-hub.md) → ResearchGate / publisher.
+**Download priority** (try in order):
 
-### For arXiv papers
+| Priority | Source | Method | Speed |
+|----------|--------|--------|-------|
+| 1 | **arXiv** | Direct PDF link | Fast, 1 req/3.5s |
+| 2 | **Sci-Hub** | Two-step (scrape meta → download storage URL) | Medium, ~3s |
+| 3 | **MDPI / OA Library** | Open access direct download | Fast |
+| 4 | **Library Genesis** | Search DOI → download mirror | Slow, may need retry |
+| 5 | **科研通 (ablesci.com)** | Community paper request (manual) | Slow, human-dependent |
+| 6 | **全国图书馆参考咨询联盟** | Library document delivery (manual) | Slow, human-dependent |
+| 7 | **ResearchGate** | Often blocked, needs browser login | Manual |
 
-Create target directory, then download with rate limiting (1 req / 3.5 sec):
-
+### arXiv download (preferred)
 ```python
 import time, os
 
@@ -68,24 +121,33 @@ os.makedirs(dest, exist_ok=True)
 
 for i, (arxiv_id, short_name) in enumerate(papers):
     filename = f"{arxiv_id}_{short_name}.pdf"
-    filepath = os.path.join(dest, filename)
     url = f"https://arxiv.org/pdf/{arxiv_id}"
     
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     data = urllib.request.urlopen(req, timeout=60).read()
-    with open(filepath, 'wb') as f: f.write(data)
+    with open(os.path.join(dest, filename), 'wb') as f: f.write(data)
     
     if i < len(papers) - 1:
         time.sleep(3.5)  # respect arXiv rate limit
 ```
 
-### For paywalled papers (Sci-Hub)
+### Sci-Hub download (paywalled papers)
+See `references/sci-hub.md`. Two-step: scrape `sci-hub.st/<DOI>` for `<meta property="pdf_url">`, then download that storage URL with Referer header.
 
-Use the two-step method — scrape PDF URL from `<meta property="pdf_url">`, then download the storage URL. The PDF storage URLs bypass the anti-bot captcha on the HTML page. Full reference: `references/sci-hub.md`.
+### Library Genesis (libgen)
+Search by DOI. Domain may change — try `libgen.is`, `libgen.li`, `libgen.gs`, `libgen.st`.
+```bash
+# Search by DOI on libgen
+curl -s "https://libgen.is/scimag/?s=<DOI>" | grep -oP 'href="[^"]*\.pdf[^"]*"'
+```
 
-Batch script: `scripts/batch_scihub_download.sh`
+### 科研通 (ablesci.com)
+Chinese paper-request community. Post a request with DOI, other users fulfill it. Requires account. Use as last resort for hard-to-find Chinese papers.
 
-**Naming convention**: `{FirstAuthor}{Year}_{Short_English_Title}.pdf` (for arXiv: `{arXiv_ID}_{Short_Name}.pdf`)
+### 全国图书馆参考咨询联盟 (ucdrs.superlib.net)
+Chinese library consortium. Can request document delivery for papers in Chinese library databases. Manual process, good for CNKI/万方 papers not on Sci-Hub.
+
+**Naming convention**: `{FirstAuthor}{Year}_{Short_English_Title}.pdf`
 
 ## Step 3: Generate Literature Overview (.md)
 
