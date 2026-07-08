@@ -1,0 +1,104 @@
+<mujoco model="6dof_arm">
+    <compiler angle="radian"/>
+    
+    <option timestep="0.002" gravity="0 0 -9.81"
+            cone="pyramidal"
+            impratio="5"
+            tolerance="1e-6"
+            ls_tolerance="1e-4"
+            noslip_tolerance="1e-4">
+        <flag contact="enable" energy="enable"/>
+    </option>
+
+    <default>
+        <joint armature="0.005" damping="1.0" frictionloss="0.2"/>
+        <!-- solref/solimp soften rigid contacts to reduce force jitter -->
+        <geom contype="1" conaffinity="1"
+              solref="0.02 1" solimp="0.9 0.95 0.001"/>
+        <default class="base_link">
+            <geom type="cylinder" rgba="0.25 0.25 0.3 1" size="0.06 0.06"/>
+        </default>
+        <default class="arm_link">
+            <geom type="capsule" size="0.035" rgba="0.2 0.55 0.85 1"/>
+        </default>
+        <default class="wrist_link">
+            <geom type="capsule" size="0.025" rgba="0.3 0.65 0.9 1"/>
+        </default>
+        <default class="wall">
+            <geom type="box" rgba="0.9 0.3 0.3 0.7"/>
+        </default>
+    </default>
+
+    <asset>
+        <texture name="grid" type="2d" builtin="checker" width="512" height="512"
+                 rgb1="0.15 0.15 0.15" rgb2="0.25 0.25 0.25"/>
+        <material name="grid_mat" texture="grid" texrepeat="1 1" reflectance="0.05"/>
+    </asset>
+
+    <worldbody>
+        <geom name="floor" type="plane" size="2 2 0.001" material="grid_mat"/>
+
+        <!-- Wall for force-control demos -->
+        <body name="wall" pos="0.65 0 0.4">
+            <geom name="wall_surface" type="box" size="0.02 0.3 0.5" class="wall"/>
+        </body>
+
+        <!-- 6-DOF arm: Z-Y-Y-Z-Y-Z (UR5-style) -->
+        <body name="base" pos="0 0 0.06">
+            <geom name="base_geom" type="cylinder" size="0.08 0.06" class="base_link"/>
+
+            <joint name="joint1" type="hinge" axis="0 0 1" range="-2.8 2.8"/>
+            <body name="link1" pos="0 0 0.1">
+                <geom name="link1_geom" type="capsule" size="0.05" fromto="0 0 0 0 0 0.12" class="base_link"/>
+
+                <joint name="joint2" type="hinge" axis="0 1 0" range="-2.2 1.5"/>
+                <body name="link2" pos="0 0 0.12">
+                    <geom name="link2_geom" type="capsule" size="0.04" fromto="0 0 0 0 0 0.28" class="arm_link"/>
+
+                    <joint name="joint3" type="hinge" axis="0 1 0" range="-2.8 1.5"/>
+                    <body name="link3" pos="0 0 0.28">
+                        <geom name="link3_geom" type="capsule" size="0.035" fromto="0 0 0 0 0 0.24" class="arm_link"/>
+
+                        <joint name="joint4" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+                        <body name="link4" pos="0 0 0.24">
+                            <geom name="link4_geom" type="capsule" size="0.03" fromto="0 0 0 0 0 0.08" class="wrist_link"/>
+
+                            <joint name="joint5" type="hinge" axis="0 1 0" range="-2.0 2.0"/>
+                            <body name="link5" pos="0 0 0.08">
+                                <geom name="link5_geom" type="capsule" size="0.025" fromto="0 0 0 0 0 0.06" class="wrist_link"/>
+
+                                <joint name="joint6" type="hinge" axis="0 0 1" range="-6.28 6.28"/>
+                                <body name="link6" pos="0 0 0.06">
+                                    <geom name="link6_geom" type="capsule" size="0.02" fromto="0 0 -0.02 0 0 0.06" class="wrist_link"/>
+                                    <site name="end_effector" pos="0 0 0.08" size="0.015" rgba="1 0 0 1"/>
+                                </body>
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        </body>
+
+        <light name="light1" pos="1.5 1.5 2.5" dir="-0.5 -0.5 -1" diffuse="0.7 0.7 0.7"/>
+        <light name="light2" pos="-1 1 0.5" dir="0.3 -0.3 -0.15" diffuse="0.3 0.3 0.3"/>
+    </worldbody>
+
+    <actuator>
+        <motor name="motor1" joint="joint1" gear="1" ctrlrange="-80 80"/>
+        <motor name="motor2" joint="joint2" gear="1" ctrlrange="-80 80"/>
+        <motor name="motor3" joint="joint3" gear="1" ctrlrange="-80 80"/>
+        <motor name="motor4" joint="joint4" gear="1" ctrlrange="-40 40"/>
+        <motor name="motor5" joint="joint5" gear="1" ctrlrange="-40 40"/>
+        <motor name="motor6" joint="joint6" gear="1" ctrlrange="-20 20"/>
+    </actuator>
+
+    <sensor>
+        <jointpos name="pos1" joint="joint1"/>  <jointvel name="vel1" joint="joint1"/>
+        <jointpos name="pos2" joint="joint2"/>  <jointvel name="vel2" joint="joint2"/>
+        <jointpos name="pos3" joint="joint3"/>  <jointvel name="vel3" joint="joint3"/>
+        <jointpos name="pos4" joint="joint4"/>  <jointvel name="vel4" joint="joint4"/>
+        <jointpos name="pos5" joint="joint5"/>  <jointvel name="vel5" joint="joint5"/>
+        <jointpos name="pos6" joint="joint6"/>  <jointvel name="vel6" joint="joint6"/>
+        <force name="end_force" site="end_effector"/>
+    </sensor>
+</mujoco>
