@@ -243,10 +243,10 @@ curl -s "https://api.github.com/search/repositories?q=关键词&sort=stars&order
 | 6 | **全国图书馆参考咨询联盟** | 馆际互借（手动） | 慢 |
 | 7 | **ResearchGate** | 常需登录 | 手动 |
 
-#### arXiv 下载
+#### arXiv 下载 ⚡ 先下到 /tmp 再 cp 到目标目录
 
 ```python
-import urllib.request, time, os
+import urllib.request, shutil, os, tempfile
 
 dest = "/mnt/e/目标目录"  # Step 0 的用户目录
 os.makedirs(dest, exist_ok=True)
@@ -255,22 +255,34 @@ for i, (arxiv_id, short_name) in enumerate(papers):
     filename = f"{arxiv_id}_{short_name}.pdf"
     filepath = os.path.join(dest, filename)
 
-    if os.path.exists(filepath) and os.path.getsize(filepath) > 1000:
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 500:
         print(f"[{i+1}/{len(papers)}] SKIP: {filename}")
         continue
 
-    url = f"https://arxiv.org/pdf/{arxiv_id}"
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    data = urllib.request.urlopen(req, timeout=60).read()
-    if len(data) < 500:
-        raise Exception(f"Too small: {len(data)} bytes")
-    with open(filepath, 'wb') as f:
-        f.write(data)
-    print(f"[{i+1}/{len(papers)}] OK: {filename} ({len(data)/1024:.0f} KB)")
-
-    if i < len(papers) - 1:
-        time.sleep(3.5)
+    # ⚡ Download to /tmp (ext4) first, then copy to /mnt/
+    # /mnt/ cross-filesystem I/O is 5-10x slower than ext4
+    tmp = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+    try:
+        url = f"https://arxiv.org/pdf/{arxiv_id}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        data = urllib.request.urlopen(req, timeout=30).read()
+        if len(data) < 500:
+            raise Exception(f"Too small: {len(data)} bytes")
+        tmp.write(data)
+        tmp.close()
+        shutil.copy(tmp.name, filepath)
+        os.unlink(tmp.name)
+        print(f"[{i+1}/{len(papers)}] OK: {filename} ({len(data)//1024} KB)")
+    except Exception as e:
+        tmp.close()
+        os.unlink(tmp.name)
+        print(f"[{i+1}/{len(papers)}] FAIL: {filename} — {e}")
 ```
+
+- **不要加 time.sleep()** — PDF 直链无需限速，sleep 白耗时间
+- 单文件超时 30s（大论文也够），不要设 60s+
+- **终端 curl 也可用**: `curl -sL -o /tmp/x.pdf ... && cp /tmp/x.pdf "$DEST/"`
+- 同理由：`execute_code` 超时通常不是网络问题，是 /mnt/ 写入慢
 
 #### Sci-Hub（付费论文）⚠️ 成功率低，优先浏览器手动下载
 
@@ -283,6 +295,8 @@ Sci-Hub 的反爬在不断升级。两段法（抓 meta → 下 storage URL）**
 | `sci-hub.se` | ❌ 超时 | ❌ 超时 |
 
 **结论**：Sci-Hub 反爬时松时严，不要依赖。优先尝试 `sci-hub.ru`（昨晚验证可用），成功时 meta 标签是 `citation_pdf_url`（不是旧的 `pdf_url`）。如果被 CAPTCHA 拦住，直接让用户浏览器手动下载。
+
+⚠️ **技术细节**：用 terminal curl 而非 Python urllib（urllib 必被 CAPTCHA，curl 冷启动偶过）。详见 `references/sci-hub-techniques.md`。
 
 #### Library Genesis
 
@@ -298,10 +312,10 @@ curl -s "https://libgen.is/scimag/?s=<DOI>" | grep -oP 'href="[^"]*\.pdf[^"]*"'
 
 ### 2.2 GitHub 代码包下载
 
-用 `execute_code`（不要 terminal，/mnt/d 跨文件系统慢容易超时）：
+⚡ **先下到 /tmp，再 cp 到目标目录**：
 
 ```python
-import urllib.request, zipfile, os
+import urllib.request, zipfile, shutil, os, tempfile
 
 dest = "/mnt/d/目标路径"
 os.makedirs(dest, exist_ok=True)
@@ -309,19 +323,19 @@ os.makedirs(dest, exist_ok=True)
 repos = [("owner/repo", "https://github.com/owner/repo/archive/refs/heads/main.zip")]
 
 for name, url in repos:
-    zip_path = os.path.join(dest, f"{name.split('/')[1]}.zip")
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    data = urllib.request.urlopen(req, timeout=120).read()
-    with open(zip_path, 'wb') as f:
-        f.write(data)
-    # 解压
-    with zipfile.ZipFile(zip_path, 'r') as zf:
-        zf.extractall(dest)
-    os.remove(zip_path)
+    tmp = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        data = urllib.request.urlopen(req, timeout=60).read()
+        tmp.write(data)
+        tmp.close()
+        with zipfile.ZipFile(tmp.name, 'r') as zf:
+            zf.extractall(dest)
+    finally:
+        os.unlink(tmp.name)
 ```
 
-- 大文件（>100MB）逐个下载
-- 优先用 Python zipfile 而非 WSL unzip（快、不超时）
+或终端一行：`curl -sL "$URL" -o /tmp/x.zip && unzip -q /tmp/x.zip -d "$DEST" && rm /tmp/x.zip`
 
 ---
 
@@ -605,12 +619,14 @@ Windows Python 路径: `C:\Users\ZJC\AppData\Local\hermes\hermes-agent\venv\Scri
 - 多平台结果去重用 `arxiv_id.split('v')[0]` + `DOI`
 
 ### 下载
+- **/mnt/ 跨文件系统写入慢 5-10 倍** — 必须先下到 `/tmp`（ext4），再 `cp` 到目标目录。直接在 /mnt/ 写 PDF 会导致 execute_code 超时
+- **不要加 time.sleep() 在 PDF 下载循环里** — arXiv 直链无限速，sleep 纯属浪费时间
+- 单文件下载超时 30s 足够（大论文也够了），不要设 60s+
 - **Sci-Hub 反爬时松时严** — 优先试 `sci-hub.ru`；meta 标签已改为 `citation_pdf_url`；被拦就浏览器手动下载
 - **不要被 Sci-Hub 首页 200 OK 迷惑** — 首页无 CAPTCHA，但下论文时触发验证
 - arXiv ID 不能猜 — 必须 API 搜索确认，猜错会下到无关论文
-- 下载后必验证 — PyPDF2 检查第一页标题
+- 下载后必验证 — PyPDF2 检查第一页标题 + EOF marker
 - 论文命名不要中文 — 跨平台兼容问题
-- /mnt/d 跨文件系统用 Python（zipfile、os），避免 shell 超时
 
 ### 综述写作
 - **绝对不要翻译 PDF** — 用户拒绝机器翻译结果
