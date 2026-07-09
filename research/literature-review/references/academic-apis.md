@@ -58,29 +58,9 @@ GET https://api.crossref.org/works?query=<query>&rows=20&filter=type:journal-art
 - 支持 `filter=from-pub-date:2020-01-01` 按年份过滤
 - 响应较慢，偶尔 429（限速比 Semantic Scholar 宽松）
 
-解析示例：
-```python
-import urllib.request, json, urllib.parse
-
-url = f"https://api.crossref.org/works?query={urllib.parse.quote(query)}&rows=15&filter=type:journal-article"
-req = urllib.request.Request(url, headers={"User-Agent": "Hermes/1.0 (mailto:research@example.com)"})
-with urllib.request.urlopen(req, timeout=30) as resp:
-    data = json.loads(resp.read())
-
-for item in data.get("message", {}).get("items", []):
-    title = item.get("title", ["?"])[0]
-    year = item.get("published-print", {}).get("date-parts", [[0]])[0][0]
-    doi = item.get("DOI", "")
-    container = (item.get("container-title") or [""])[0]
-    authors = ", ".join([
-        f"{a.get('given','')} {a.get('family','')}"
-        for a in item.get("author", [])[:4]
-    ])
-```
-
 ## arXiv API（预印本/前沿方法）
 
-详见 SKILL.md 原有内容。用于找预印本和最新方法，不适合找综述。
+详见 SKILL.md。用于找预印本和最新方法，不适合找综述。
 
 ## Semantic Scholar API（限速严格，最后手段）
 
@@ -88,12 +68,11 @@ for item in data.get("message", {}).get("items", []):
 GET https://api.semanticscholar.org/graph/v1/paper/search?query=<query>&limit=10&fields=title,year,authors,externalIds
 ```
 
-限制：两三次查询后必 429。仅当其他 API 都失败时使用，每次查询间隔 ≥ 3 秒。
-优先使用 OpenAlex 替代，两者覆盖范围相似但 OpenAlex 无限速。
+两三次查询后必 429。仅当其他 API 都失败时使用，≥ 3 秒间隔。
 
 ## DBLP（不推荐）
 
-经常返回 500 或空结果，CS 论文覆盖率不如 OpenAlex。不再使用。
+经常返回 500 或空结果，CS 覆盖率不如 OpenAlex。不再使用。
 
 ## API 选择决策树
 
